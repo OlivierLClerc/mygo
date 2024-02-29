@@ -5,13 +5,13 @@ import sys
 import networkx as nx
 import collections
 from pygame import gfxdraw
-
+import random
 
 # Game constants
 BOARD_BROWN = (199, 105, 42)
-BOARD_WIDTH = 1000
+BOARD_WIDTH = 900
 BOARD_BORDER = 75
-STONE_RADIUS = 22
+STONE_RADIUS = 18
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 TURN_POS = (BOARD_BORDER, 20)
@@ -150,6 +150,55 @@ def is_valid_move(col, row, board):
         return False
     return board[col, row] == 0
 
+def handle_capture(board, color, prisoners):
+    """Handle the capture of stones on the board.
+
+    Args:
+        board (np.array): The game board.
+        color (str): The color of the stones to check for capture.
+        prisoners (dict): The prisoners dictionary to update captures.
+
+    Returns:
+        bool: True if a capture occurred, False otherwise.
+    """
+    capture_happened = False
+    color_code = 1 if color == "black" else 2
+    for group in list(get_stone_groups(board, color)):
+        if has_no_liberties(board, group):
+            capture_happened = True
+            for i, j in group:
+                board[i, j] = 0  # Remove the captured stones from the board
+            prisoners[color] += len(group)  # Update the prisoners count
+
+    return capture_happened
+
+def handle_invalid_placement(board, col, row, color):
+    """Handle the invalid placement of a stone on the board.
+
+    Args:
+        board (np.array): The game board.
+        col (int): Column number where the stone is placed.
+        row (int): Row number where the stone is placed.
+        color (str): The color of the stone placed.
+
+    Returns:
+        bool: True if the placement is invalid and the stone was removed, False otherwise.
+    """
+    for group in get_stone_groups(board, color):
+        if (col, row) in group:
+            if has_no_liberties(board, group):
+                board[col, row] = 0  # Remove the invalid stone
+                return True  # Invalid placement, stone removed
+    return False  # Valid placement, no action taken
+
+def simulate_move(self, col, row, color):
+    simulated_board = np.copy(self.board)
+    simulated_board[col, row] = 1 if color == "black" else 2
+
+    capture_happened = handle_capture(simulated_board, other_color, self.prisoners)
+    invalid_placement = handle_invalid_placement(simulated_board, col, row, self_color)
+
+    return simulated_board
 
 class Game:
     def __init__(self, size):
@@ -158,6 +207,9 @@ class Game:
         self.black_turn = True
         self.prisoners = collections.defaultdict(int)
         self.start_points, self.end_points = make_grid(self.size)
+        self.running = True
+        self.pass_counter = 0  # Add this line to initialize the pass counter
+        self.prev_board = None  # Initialize prev_board
 
     def init_pygame(self):
         pygame.init()
@@ -186,47 +238,42 @@ class Game:
     def pass_move(self):
         self.black_turn = not self.black_turn
         self.draw()
+        self.pass_counter += 1  # Increment the pass counter on each pass
+
+        # Check if there have been two consecutive passes
+        if self.pass_counter >= 2:
+            self.end_game()  # Handle the end of the game
 
     def handle_click(self):
-        # get board position
+        # Get board position from mouse click
+        self.prev_board = np.copy(self.board)  # Make a deep copy of the board
         x, y = pygame.mouse.get_pos()
         col, row = xy_to_colrow(x, y, self.size)
         if not is_valid_move(col, row, self.board):
-            self.ZOINK.play()
+            self.ZOINK.play()  # Play sound if move is not valid
             return
 
-        # update board array
+        # Update board array with the current player's color
         self.board[col, row] = 1 if self.black_turn else 2
 
-        # get stone groups for black and white
+        # Determine the colors for the current and opponent player
         self_color = "black" if self.black_turn else "white"
         other_color = "white" if self.black_turn else "black"
 
-        # handle captures
-        capture_happened = False
-        for group in list(get_stone_groups(self.board, other_color)):
-            if has_no_liberties(self.board, group):
-                capture_happened = True
-                for i, j in group:
-                    self.board[i, j] = 0
-                self.prisoners[self_color] += len(group)
+        # Handle captures for the opponent's color
+        capture_happened = handle_capture(self.board, other_color, self.prisoners)
 
-        # handle special case of invalid stone placement
-        # this must be done separately because we need to know if capture resulted
-        if not capture_happened:
-            group = None
-            for group in get_stone_groups(self.board, self_color):
-                if (col, row) in group:
-                    break
-            if has_no_liberties(self.board, group):
-                self.ZOINK.play()
-                self.board[col, row] = 0
-                return
+        # Handle special case of invalid stone placement
+        invalid_placement = handle_invalid_placement(self.board, col, row, self_color)
+        if invalid_placement:
+            self.ZOINK.play()  # Play sound if stone placement was invalid
+            return  # Exit the function, no need to switch turns or redraw
 
-        # change turns and draw screen
-        self.CLICK.play()
+        # If the move was successful and valid, switch turns, reset pass counter, and redraw the board
+        self.CLICK.play()  # Play sound for valid placement
         self.black_turn = not self.black_turn
-        self.draw()
+        self.pass_counter = 0  # Reset the pass counter whenever a move is made
+        self.draw()  # Redraw the board with the new stone
 
     def draw(self):
         # draw stones - filled circle and antialiased ring
@@ -268,6 +315,10 @@ class Game:
                 if event.key == pygame.K_p:
                     self.pass_move()
 
+    def end_game(self):
+        # Display the final score or a game over message
+        print("Game over. Final score - Black's Prisoners: {}, White's Prisoners: {}".format(self.prisoners['black'], self.prisoners['white']))
+        self.running = False
 
 if __name__ == "__main__":
     g = Game(size=19)
@@ -275,6 +326,8 @@ if __name__ == "__main__":
     g.clear_screen()
     g.draw()
 
-    while True:
+    while g.running:  # Check if the game is still running
         g.update()
         pygame.time.wait(100)
+
+    pygame.quit()  # Ensure pygame quits after the loop exits
