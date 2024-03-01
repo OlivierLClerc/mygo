@@ -185,20 +185,26 @@ def handle_invalid_placement(board, col, row, color):
     """
     for group in get_stone_groups(board, color):
         if (col, row) in group:
-            if has_no_liberties(board, group):
-                board[col, row] = 0  # Remove the invalid stone
-                return True  # Invalid placement, stone removed
-    return False  # Valid placement, no action taken
+            break
+    if has_no_liberties(board, group):
+        board[col, row] = 0  # Remove the invalid stone
+        return True  # Invalid placement, stone removed
 
 def simulate_move(self, col, row, self_color, other_color, prisoners):
+    invalid_placement = False
     simulated_board = np.copy(self.board)
     # Update board array with the current player's color
     simulated_board[col, row] = 1 if self_color=="black" else 2
     # Simulate capture
     capture_happened = handle_capture(simulated_board, other_color, prisoners)
-    invalid_placement = handle_invalid_placement(simulated_board, col, row, self_color)
+    if not capture_happened:
+        invalid_placement = handle_invalid_placement(simulated_board, col, row, self_color)
 
-    return simulated_board
+    return simulated_board, invalid_placement
+
+# def count_territory():
+    
+
 
 class Game:
     def __init__(self, size):
@@ -257,14 +263,13 @@ class Game:
         self_color = "black" if self.black_turn else "white"
         other_color = "white" if self.black_turn else "black"
 
-        simulated_board = simulate_move(self, col, row, self_color, other_color, self.prisoners)
+        simulated_board, invalid_placement = simulate_move(self, col, row, self_color, other_color, self.prisoners)
 
         #compare the simulated board to the previous board
         if self.prev_board is not None and np.array_equal(simulated_board, self.prev_board):
             self.ZOINK.play()  # Play sound if move is not valid
             return
         else:
-            invalid_placement = handle_invalid_placement(self.board, col, row, self_color)
             if invalid_placement:
                 self.ZOINK.play()  # Play sound if stone placement was invalid
                 return  # Exit the function, no need to switch turns or redraw
