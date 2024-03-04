@@ -202,9 +202,16 @@ def simulate_move(self, col, row, self_color, other_color, prisoners):
 
     return simulated_board, invalid_placement
 
-# def count_territory():
-    
+def count_territory(board, prisoners):
+    # Initialize scores for black and white
+    black_score = 0
+    white_score = 6.5 # Komi
 
+
+    black_score -= prisoners['black']
+    white_score -= prisoners['white']
+    # Return the scores
+    return black_score, white_score
 
 class Game:
     def __init__(self, size):
@@ -214,7 +221,7 @@ class Game:
         self.prisoners = collections.defaultdict(int)
         self.start_points, self.end_points = make_grid(self.size)
         self.running = True
-        self.pass_counter = 0  # Add this line to initialize the pass counter
+        self.pass_counter = 0  # initialize the pass counter
         self.prev_board = None  # Initialize prev_board
         self.undo_count = 0  # Initialize undo_count
 
@@ -329,14 +336,16 @@ class Game:
                     else:
                         self.ZOINK.play()  # Play sound if move is not valid
                         return
-
     def end_game(self):
         # Display the final score or a game over message
-        print("Game over. Final score - Black's Prisoners: {}, White's Prisoners: {}".format(self.prisoners['black'], self.prisoners['white']))
+        black_score, white_score = count_territory(self.board, self.prisoners)
+        print(f"Game over. Final score - Black: {black_score}, White: {white_score}")
+        #print("Game over. Final score - Black's Prisoners: {}, White's Prisoners: {}".format(self.prisoners['black'], self.prisoners['white']))
         self.running = False
 
+
 if __name__ == "__main__":
-    g = Game(size=19)
+    g = Game(size=9)
     g.init_pygame()
     g.clear_screen()
     g.draw()
