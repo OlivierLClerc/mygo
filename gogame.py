@@ -374,7 +374,7 @@ class Game:
 
 
 if __name__ == "__main__":
-    g = Game(size=9)
+    g = Game(size=19)
     g.init_pygame()
     g.clear_screen()
     g.draw()
