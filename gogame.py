@@ -5,13 +5,13 @@ import sys
 import networkx as nx
 import collections
 from pygame import gfxdraw
-
+import random
 
 # Game constants
 BOARD_BROWN = (199, 105, 42)
-BOARD_WIDTH = 1000
+BOARD_WIDTH = 900
 BOARD_BORDER = 75
-STONE_RADIUS = 22
+STONE_RADIUS = 18
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 TURN_POS = (BOARD_BORDER, 20)
@@ -150,6 +150,73 @@ def is_valid_move(col, row, board):
         return False
     return board[col, row] == 0
 
+def handle_capture(board, color, prisoners):
+    """Handle the capture of stones on the board.
+
+    Args:
+        board (np.array): The game board.
+        color (str): The color of the stones to check for capture.
+        prisoners (dict): The prisoners dictionary to update captures.
+
+    Returns:
+        bool: True if a capture occurred, False otherwise.
+    """
+    capture_happened = False
+    for group in list(get_stone_groups(board, color)):
+        if has_no_liberties(board, group):
+            capture_happened = True
+            for i, j in group:
+                board[i, j] = 0  # Remove the captured stones from the board
+            prisoners[color] += len(group)  # Update the prisoners count
+
+    return capture_happened
+
+def handle_invalid_placement(board, col, row, color):
+    """Handle the invalid placement of a stone on the board.
+
+    Args:
+        board (np.array): The game board.
+        col (int): Column number where the stone is placed.
+        row (int): Row number where the stone is placed.
+        color (str): The color of the stone placed.
+
+    Returns:
+        bool: True if the placement is invalid and the stone was removed, False otherwise.
+    """
+    for group in get_stone_groups(board, color):
+        if (col, row) in group:
+            break
+    if has_no_liberties(board, group):
+        board[col, row] = 0  # Remove the invalid stone
+        return True  # Invalid placement, stone removed
+
+def simulate_move(self, col, row, self_color, other_color, prisoners):
+    legal_move = False
+    simulated_board = np.copy(self.board)
+    # Update board array with the current player's color
+    simulated_board[col, row] = 1 if self_color=="black" else 2
+    # Simulate capture
+    capture_happened = handle_capture(simulated_board, other_color, prisoners)
+    if not capture_happened:
+        legal_move = handle_invalid_placement(simulated_board, col, row, self_color)
+
+    #compare the simulated board to the previous board
+    if self.prev_board is not None and np.array_equal(simulated_board, self.prev_board):
+        legal_move = True
+ 
+    return simulated_board, legal_move
+
+
+def count_territory(board, prisoners):
+    # Initialize scores for black and white
+    black_score = 0
+    white_score = 6.5 # Komi
+
+
+    black_score -= prisoners['black']
+    white_score -= prisoners['white']
+    # Return the scores
+    return black_score, white_score
 
 class Game:
     def __init__(self, size):
@@ -158,6 +225,10 @@ class Game:
         self.black_turn = True
         self.prisoners = collections.defaultdict(int)
         self.start_points, self.end_points = make_grid(self.size)
+        self.running = True
+        self.pass_counter = 0  # initialize the pass counter
+        self.prev_board = None  # Initialize prev_board
+        self.undo_count = 0  # Initialize undo_count
 
     def init_pygame(self):
         pygame.init()
@@ -186,47 +257,63 @@ class Game:
     def pass_move(self):
         self.black_turn = not self.black_turn
         self.draw()
+        self.pass_counter += 1  # Increment the pass counter on each pass
+
+        # Check if there have been two consecutive passes
+        if self.pass_counter >= 2:
+            self.end_game()  # Handle the end of the game
 
     def handle_click(self):
-        # get board position
+        # Get board position from mouse click
         x, y = pygame.mouse.get_pos()
         col, row = xy_to_colrow(x, y, self.size)
         if not is_valid_move(col, row, self.board):
-            self.ZOINK.play()
+            self.ZOINK.play()  # Play sound if move is not valid
             return
 
-        # update board array
-        self.board[col, row] = 1 if self.black_turn else 2
-
-        # get stone groups for black and white
+        # Determine the colors for the current and opponent player
         self_color = "black" if self.black_turn else "white"
         other_color = "white" if self.black_turn else "black"
 
-        # handle captures
-        capture_happened = False
-        for group in list(get_stone_groups(self.board, other_color)):
-            if has_no_liberties(self.board, group):
-                capture_happened = True
-                for i, j in group:
-                    self.board[i, j] = 0
-                self.prisoners[self_color] += len(group)
+        simulated_board, legal_move = simulate_move(self, col, row, self_color, other_color, self.prisoners)
+        if legal_move:
+            self.ZOINK.play()  # Play sound if move is not valid
+            return
 
-        # handle special case of invalid stone placement
-        # this must be done separately because we need to know if capture resulted
-        if not capture_happened:
-            group = None
-            for group in get_stone_groups(self.board, self_color):
-                if (col, row) in group:
-                    break
-            if has_no_liberties(self.board, group):
-                self.ZOINK.play()
-                self.board[col, row] = 0
-                return
-
-        # change turns and draw screen
-        self.CLICK.play()
+        self.CLICK.play()  # Play sound for valid placement
+        self.prev_board = np.copy(self.board)  # Make a deep copy of the board
+        self.board = simulated_board
         self.black_turn = not self.black_turn
-        self.draw()
+        self.pass_counter = 0  # Reset the pass counter whenever a move is made
+        self.undo_count = 0  # Reset undo_count after a new move is made
+        self.draw()  # Redraw the board with the new stone
+
+    def ai_make_move(self):
+        valid_move_found = False
+        while not valid_move_found:
+            # Generate a random move
+            col = random.randint(0, self.size - 1)
+            row = random.randint(0, self.size - 1)
+
+            # Check if the move is valid
+            if is_valid_move(col, row, self.board):
+                valid_move_found = True
+
+                # Determine the colors for the current and opponent player
+                self_color = "black" if self.black_turn else "white"
+                other_color = "white" if self.black_turn else "black"
+
+                # Simulate and apply the move
+                simulated_board, legal_move = simulate_move(self, col, row, self_color, other_color, self.prisoners)
+                if not legal_move:
+                    self.prev_board = np.copy(self.board)  # Make a deep copy of the board
+                    self.board = simulated_board
+                    self.black_turn = not self.black_turn
+                    self.pass_counter = 0  # Reset the pass counter whenever a move is made
+                    self.undo_count = 0  # Reset undo_count after a new move is made
+                    self.draw()  # Redraw the board with the new stone
+                else:
+                    valid_move_found = False  # The randomly chosen move was invalid, try again
 
     def draw(self):
         # draw stones - filled circle and antialiased ring
@@ -249,7 +336,7 @@ class Game:
         self.screen.blit(txt, SCORE_POS)
         turn_msg = (
             f"{'Black' if self.black_turn else 'White'} to move. "
-            + "Click to place stone, press P to pass."
+            + "Click to place stone, press P to pass, U to undo."
         )
         txt = self.font.render(turn_msg, True, BLACK)
         self.screen.blit(txt, TURN_POS)
@@ -257,24 +344,43 @@ class Game:
         pygame.display.flip()
 
     def update(self):
-        # TODO: undo button
         events = pygame.event.get()
         for event in events:
             if event.type == pygame.MOUSEBUTTONUP:
                 self.handle_click()
-            if event.type == pygame.QUIT:
+            elif event.type == pygame.QUIT:
                 sys.exit()
-            if event.type == pygame.KEYUP:
+            elif event.type == pygame.KEYUP:
                 if event.key == pygame.K_p:
                     self.pass_move()
+                elif event.key == pygame.K_u:
+                    if self.prev_board is not None and self.undo_count==0:
+                        self.board=self.prev_board
+                        self.black_turn = not self.black_turn
+                        self.draw()  # Redraw the board with the undone state
+                        self.undo_count +=1
+                    else:
+                        self.ZOINK.play()  # Play sound if move is not valid
+                        return
+                elif event.key == pygame.K_i:
+                    self.ai_make_move()
+
+    def end_game(self):
+        # Display the final score or a game over message
+        black_score, white_score = count_territory(self.board, self.prisoners)
+        print(f"Game over. Final score - Black: {black_score}, White: {white_score}")
+        #print("Game over. Final score - Black's Prisoners: {}, White's Prisoners: {}".format(self.prisoners['black'], self.prisoners['white']))
+        self.running = False
 
 
 if __name__ == "__main__":
-    g = Game(size=19)
+    g = Game(size=9)
     g.init_pygame()
     g.clear_screen()
     g.draw()
 
-    while True:
+    while g.running:  # Check if the game is still running
         g.update()
         pygame.time.wait(100)
+
+    pygame.quit()  # Ensure pygame quits after the loop exits
